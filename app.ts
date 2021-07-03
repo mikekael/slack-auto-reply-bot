@@ -23,7 +23,7 @@ app.post('/', async ({ body }: Request<any, ResponseBody, RequestBody>, res: Res
     return next(new BadRequest('Invalid request event type'))
   }
 
-  // if we have
+  // handle url verification
   if (type === 'url_verification') {
     return res.send({
       challenge: body.challenge
