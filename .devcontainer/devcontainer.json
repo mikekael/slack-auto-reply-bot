@@ -1,0 +1,4 @@
+{
+    "name": "slack-auto-reply-bot",
+    "image": "mhart/alpine-node:14"
+}
