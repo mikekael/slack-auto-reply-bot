@@ -1,8 +1,9 @@
 import { WebClient } from '@slack/web-api'
-import { json } from 'body-parser'
+import { json, urlencoded } from 'body-parser'
 import express, { Request, Response } from 'express'
 import { NextFunction } from 'express-serve-static-core'
 import { BadRequest } from 'http-errors'
+import Storage from './src/storage'
 
 const VERIFICATION_TOKEN = process.env.VERIFICATION_TOKEN
 const TOKEN = process.env.TOKEN // @todo will be used the oauth2 approach for exchanging tokens
@@ -11,8 +12,9 @@ const app = express()
 
 // add json parser
 app.use(json())
+app.use(urlencoded())
 
-app.post('/', async ({ body }: Request<any, ResponseBody, RequestBody>, res: Response<ResponseBody>, next: NextFunction) => {
+app.post('/event', async ({ body }: Request<any, ResponseBody, RequestBody>, res: Response<ResponseBody>, next: NextFunction) => {
   const { type, token } = body
 
   if (token !== VERIFICATION_TOKEN) {
@@ -43,12 +45,28 @@ app.post('/', async ({ body }: Request<any, ResponseBody, RequestBody>, res: Res
     if (event.bot_id !== undefined) {
       console.log('Event [%s] is from bot ignoring.', event_id)
       return resolve(false)
+
     }
 
-    client.chat.postMessage({
-      channel: event.channel,
-      text: 'Im currently out of office as of this moment, Ill get back to you as soon as I got back. Thanks :smiley:',
-    }).then(resolve);
+    console.log('Attempting to lookup for configured auto response for user [%s]', event.user)
+
+    const storage = new Storage;
+
+    storage.findUserConfiguration(event.user)
+      .then((config) => {
+        if (config === undefined) {
+          console.log('No configured auto response for user [%s]. Ignoring..', event.user)
+          return undefined
+        }
+
+        console.log('Found configuration for user [%s]. Attempting to post a message..', event.user)
+
+        return client.chat.postMessage({
+          channel: event.channel,
+          text: config.reply_message,
+        })
+      })
+      .then(resolve);
   })
     .then(() => res.send())
     .finally(() => console.log('Event [%s] processed successfully.', event_id))
@@ -134,6 +152,15 @@ interface BaseEvent {
    * @type {string}
    */
   readonly type: string
+
+  /**
+   * The user ID belonging to the user that incited this action. Not included in all events as not all events are controlled by users.
+   *
+   * @readonly
+   *
+   * @type {string}
+   */
+  readonly user: string
 }
 
 interface Event extends BaseEvent {
@@ -174,5 +201,65 @@ interface Event extends BaseEvent {
   readonly bot_id?: string
 }
 
-type ResponseBody = VerificationResponseBody | undefined;
+type ResponseBody = VerificationResponseBody | undefined
 type RequestBody = VerificationPayload & EventCallbackPayload
+
+
+app.post('/command', (req: Request<any, any, CommandPayload>, res: Response) => {
+  const storage = new Storage;
+  const { user_id, text } = req.body;
+
+  console.log('Processing configuration for user [%s]', user_id)
+
+  return storage.storeConfiguration(user_id, { reply_message: text })
+    .then((result) => {
+      if (result === true) return res.send('You have enabled auto response.')
+
+      return res.send('Sorry, im not able to do this for you.')
+    }).finally(() => console.log('Processed configuration for user [%s]', user_id))
+})
+
+interface CommandPayload {
+  /**
+   * This is a verification token, a deprecated feature that you shouldn't use any more.
+   * It was used to verify that requests were legitimately being sent by Slack to your app, but you should use the signed secrets functionality to do this instead.
+   *
+   * @readonly
+   *
+   * @type {string}
+   */
+  readonly token: string
+
+  /**
+   * The command that was typed in to trigger this request.
+   * This value can be useful if you want to use a single Request URL to service multiple Slash Commands, as it lets you tell them apart.
+   *
+   * @readonly
+   *
+   * @type {string}
+   */
+  command: string
+
+  /**
+   * This is the part of the Slash Command after the command itself, and it can contain absolutely anything that the user might decide to type.
+   * It is common to use this text parameter to provide extra context for the command.
+   *
+   * @readonly
+   *
+   * @type {string}
+   */
+  text: string
+
+  /**
+   * A temporary webhook URL that you can use to generate messages responses.
+   *
+   * @readonly
+   *
+   * @type {string}
+   */
+  response_url: string
+  trigger_id: string
+  user_id: string
+  user_name: string
+  api_app_id: string
+}
