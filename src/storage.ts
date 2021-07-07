@@ -31,6 +31,15 @@ export default class Storage {
       )
       .then((result) => result?.config);
   }
+
+  deleteUserConfiguration(user_id: string): Promise<boolean> {
+    return this.client.connect()
+      .then(
+        (connection) => connection.db('chatbot').collection('users').deleteOne({ user_id })
+          .finally(() => connection.close())
+      )
+      .then(({ deletedCount }) => deletedCount !== undefined && deletedCount > 0)
+  }
 }
 
 interface UserSchema {

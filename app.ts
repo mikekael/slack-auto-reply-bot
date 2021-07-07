@@ -204,19 +204,52 @@ interface Event extends BaseEvent {
 type ResponseBody = VerificationResponseBody | undefined
 type RequestBody = VerificationPayload & EventCallbackPayload
 
-
 app.post('/command', (req: Request<any, any, CommandPayload>, res: Response) => {
   const storage = new Storage;
   const { user_id, text } = req.body;
 
+  // Disables the current bot auto respond action
+  if (text === 'disable') {
+    console.log('Disabling auto response for user [%s]', user_id)
+
+    return storage.deleteUserConfiguration(user_id)
+      .then((result) => {
+        if (result === true) return res.send('You have disabled auto response.')
+
+        return res.send('Sorry, im not able to do this for you.')
+      })
+      .finally(() => console.log('Auto respond disabled for user [%s]', user_id))
+  }
+
   console.log('Processing configuration for user [%s]', user_id)
 
+  const client = new WebClient(TOKEN);
+
   return storage.storeConfiguration(user_id, { reply_message: text })
+    .then((result) => {
+      console.log('Updating profile status for user [%s]', user_id)
+
+      return Promise.all([
+        client.users.profile.set({
+          profile: JSON.stringify({
+            status_text: 'Out of office',
+            status_emoji: ':away:',
+          }),
+          user: user_id,
+        }),
+        client.users.setPresence({
+          user: user_id,
+          presence: 'away',
+        })
+      ]).then(() => result)
+        .finally(() => console.log('Profile status updated successfully'))
+    })
     .then((result) => {
       if (result === true) return res.send('You have enabled auto response.')
 
       return res.send('Sorry, im not able to do this for you.')
-    }).finally(() => console.log('Processed configuration for user [%s]', user_id))
+    })
+    .finally(() => console.log('Processed configuration for user [%s]', user_id))
 })
 
 interface CommandPayload {
